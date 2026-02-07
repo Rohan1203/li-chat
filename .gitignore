@@ -1,0 +1,36 @@
+# Database files
+*.db
+*.sqlite
+*.sqlite3
+
+# Log files
+logs/
+*.log
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Test files
+*.test
+*.out
+
+# Build artifacts
+*.o
+*.a
+*.so
+.exe
+*.dll
+
+# Go
+go.sum
+vendor/
+dist/
+build/
