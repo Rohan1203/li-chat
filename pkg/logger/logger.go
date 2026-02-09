@@ -1,7 +1,6 @@
 package logger
 
 import (
-	"fmt"
 	"os"
 
 	"go.uber.org/zap"
@@ -60,30 +59,45 @@ func Sync() {
 	}
 }
 
-func Debug(format string, args ...any) {
+// Structured logging methods for production-grade logging
+func Debug(msg string, fields ...zap.Field) {
 	if log == nil {
 		return
 	}
-	log.Debug(fmt.Sprintf(format, args...))
+	log.Debug(msg, fields...)
 }
 
-func Info(format string, args ...any) {
+func Info(msg string, fields ...zap.Field) {
 	if log == nil {
 		return
 	}
-	log.Info(fmt.Sprintf(format, args...))
+	log.Info(msg, fields...)
 }
 
-func Warn(format string, args ...any) {
+func Warn(msg string, fields ...zap.Field) {
 	if log == nil {
 		return
 	}
-	log.Warn(fmt.Sprintf(format, args...))
+	log.Warn(msg, fields...)
 }
 
-func Error(format string, args ...any) {
+func Error(msg string, fields ...zap.Field) {
 	if log == nil {
 		return
 	}
-	log.Error(fmt.Sprintf(format, args...))
+	log.Error(msg, fields...)
+}
+
+func Panic(msg string, fields ...zap.Field) {
+	if log == nil {
+		return
+	}
+	log.Panic(msg, fields...)
+}
+
+func Fatal(msg string, fields ...zap.Field) {
+	if log == nil {
+		return
+	}
+	log.Fatal(msg, fields...)
 }

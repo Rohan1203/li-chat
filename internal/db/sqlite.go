@@ -4,22 +4,23 @@ import (
 	"database/sql"
 
 	_ "github.com/mattn/go-sqlite3"
+	"go.uber.org/zap"
 
 	"li-chat/pkg/logger"
 )
 
 func NewSQLite(path string) *sql.DB {
-	logger.Info("[DB::INIT] Opening SQLite database at path: %s", path)
+	logger.Info("Opening SQLite database", zap.String("path", path))
 	db, err := sql.Open("sqlite3", path)
 	if err != nil {
-		logger.Error("[DB::INIT] Failed to open database: %v", err)
-		logger.Warn("[DB::INIT] Database initialization failed, application may not function correctly")
+		logger.Error("Failed to open database", zap.Error(err))
+		logger.Warn("Database initialization failed, application may not function correctly")
 		panic(err)
 	}
-	logger.Debug("[DB::INIT] Database driver initialized for path: %s", path)
-	logger.Info("[DB::INIT] Database connection established successfully")
+	logger.Debug("Database driver initialized", zap.String("path", path))
+	logger.Info("Database connection established successfully")
 
-	logger.Debug("[DB::SCHEMA] Starting schema creation process...")
+	logger.Debug("Starting schema creation process")
 	schema := `
 	CREATE TABLE IF NOT EXISTS users (
 		id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -43,12 +44,12 @@ func NewSQLite(path string) *sql.DB {
 	);`
 
 	if _, err := db.Exec(schema); err != nil {
-		logger.Error("[DB::SCHEMA] Failed to create database schema: %v", err)
-		logger.Warn("[DB::SCHEMA] Schema creation error - tables may be missing or corrupted")
+		logger.Error("Failed to create database schema", zap.Error(err))
+		logger.Warn("Schema creation error - tables may be missing or corrupted")
 		panic(err)
 	}
-	logger.Debug("[DB::SCHEMA] All tables created or already exist")
-	logger.Info("[DB::SCHEMA] Database schema initialization completed successfully")
+	logger.Debug("All tables created or already exist")
+	logger.Info("Database schema initialization completed successfully")
 
 	return db
 }

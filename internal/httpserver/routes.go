@@ -5,7 +5,6 @@ import (
 
 	"li-chat/internal/db"
 	"li-chat/internal/websocket"
-	"li-chat/pkg/logger"
 )
 
 func NewRouter(hub *websocket.Hub, repo *db.Repository) http.Handler {
@@ -15,7 +14,6 @@ func NewRouter(hub *websocket.Hub, repo *db.Repository) http.Handler {
 	mux.HandleFunc("/ws", websocket.HandleWS(hub, repo))
 
 	mux.HandleFunc("/health", func(w http.ResponseWriter, _ *http.Request) {
-		logger.Info("Health check endpoint called")
 		w.WriteHeader(http.StatusOK)
 		w.Write([]byte("OK"))
 	})
@@ -24,6 +22,7 @@ func NewRouter(hub *websocket.Hub, repo *db.Repository) http.Handler {
 	mux.HandleFunc("/login", auth.Login)
 	mux.HandleFunc("/logout", auth.Logout)
 	mux.HandleFunc("/whoami", auth.WhoAmI)
+	mux.HandleFunc("/refresh-token", auth.RefreshToken)
 
 	// Serve embedded web assets
 	mux.Handle("/", http.FileServer(http.FS(webFS)))

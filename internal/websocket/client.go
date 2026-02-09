@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"github.com/gorilla/websocket"
+	"go.uber.org/zap"
 
 	"li-chat/pkg/logger"
 )
@@ -16,7 +17,6 @@ type Client struct {
 	userID   int64
 	username string
 }
-
 
 const (
 	writeWait  = 10 * time.Second
@@ -30,19 +30,19 @@ type IncomingMessage struct {
 }
 
 func (c *Client) readPump() {
-	logger.Info("[CLIENT::RPUMP] Read pump started for user: %s (ID: %d)", c.username, c.userID)
-	logger.Debug("[CLIENT::RPUMP] Setting up read deadline and handlers")
+	logger.Info("Read pump started for user", zap.String("username", c.username), zap.Int64("user_id", c.userID))
+	logger.Debug("Setting up read deadline and handlers")
 
 	defer func() {
-		logger.Debug("[CLIENT::RPUMP] Cleaning up - unregistering client and closing connection")
+		logger.Debug("Cleaning up - unregistering client and closing connection")
 		c.hub.unregister <- c
 		c.conn.Close()
-		logger.Info("[CLIENT::RPUMP] Read pump ended for user: %s (ID: %d)", c.username, c.userID)
+		logger.Info("Read pump ended for user", zap.String("username", c.username), zap.Int64("user_id", c.userID))
 	}()
 
 	c.conn.SetReadDeadline(time.Now().Add(pongWait))
 	c.conn.SetPongHandler(func(string) error {
-		logger.Debug("[CLIENT::PING] Pong message received from user: %s", c.username)
+		logger.Debug("Pong message received from user", zap.String("username", c.username))
 		c.conn.SetReadDeadline(time.Now().Add(pongWait))
 		return nil
 	})
@@ -51,38 +51,38 @@ func (c *Client) readPump() {
 		_, data, err := c.conn.ReadMessage()
 		if err != nil {
 			if websocket.IsUnexpectedCloseError(err, websocket.CloseGoingAway, websocket.CloseAbnormalClosure) {
-				logger.Error("[CLIENT::RPUMP] WebSocket error from user %s (ID: %d): %v", c.username, c.userID, err)
-				logger.Warn("[CLIENT::RPUMP] Unexpected connection close")
+				logger.Error("WebSocket error from user", zap.String("username", c.username), zap.Int64("user_id", c.userID), zap.Error(err))
+				logger.Warn("Unexpected connection close")
 			} else {
-				logger.Debug("[CLIENT::RPUMP] WebSocket connection closed normally - User: %s (ID: %d)", c.username, c.userID)
+				logger.Debug("WebSocket connection closed normally", zap.String("username", c.username), zap.Int64("user_id", c.userID))
 			}
 			break
 		}
 
-		logger.Debug("[CLIENT::RCV] Raw WebSocket message received - User: %s, Size: %d bytes", c.username, len(data))
+		logger.Debug("Raw WebSocket message received", zap.String("username", c.username), zap.Int("size", len(data)))
 
 		var msg IncomingMessage
 		if err := json.Unmarshal(data, &msg); err != nil {
-			logger.Warn("[CLIENT::PARSE] Failed to unmarshal message from user %s: %v", c.username, err)
+			logger.Warn("Failed to unmarshal message from user", zap.String("username", c.username), zap.Error(err))
 			continue
 		}
 
-		logger.Debug("[CLIENT::PARSE] Message parsed successfully - From: %s, Content length: %d bytes", msg.Username, len(msg.Content))
-		logger.Debug("[CLIENT::HANDLE] Forwarding message to hub handler")
+		logger.Debug("Message parsed successfully", zap.String("username", msg.Username), zap.Int("content_length", len(msg.Content)))
+		logger.Debug("Forwarding message to hub handler")
 		c.hub.handleMessage(msg)
 	}
 }
 
 func (c *Client) writePump() {
-	logger.Info("[CLIENT::WPUMP] Write pump started for user: %s (ID: %d)", c.username, c.userID)
-	logger.Debug("[CLIENT::WPUMP] Setting up ping ticker with period: %v", pingPeriod)
+	logger.Info("Write pump started for user", zap.String("username", c.username), zap.Int64("user_id", c.userID))
+	logger.Debug("Setting up ping ticker", zap.Duration("period", pingPeriod))
 
 	ticker := time.NewTicker(pingPeriod)
 	defer func() {
-		logger.Debug("[CLIENT::WPUMP] Cleaning up - stopping ticker and closing connection")
+		logger.Debug("Cleaning up - stopping ticker and closing connection")
 		ticker.Stop()
 		c.conn.Close()
-		logger.Info("[CLIENT::WPUMP] Write pump ended for user: %s (ID: %d)", c.username, c.userID)
+		logger.Info("Write pump ended for user", zap.String("username", c.username), zap.Int64("user_id", c.userID))
 	}()
 
 	for {
@@ -90,31 +90,31 @@ func (c *Client) writePump() {
 		case message, ok := <-c.send:
 			c.conn.SetWriteDeadline(time.Now().Add(writeWait))
 			if !ok {
-				logger.Debug("[CLIENT::WPUMP] Send channel closed by hub, sending close message")
+				logger.Debug("Send channel closed by hub, sending close message")
 				if err := c.conn.WriteMessage(websocket.CloseMessage, []byte{}); err != nil {
-					logger.Error("[CLIENT::WPUMP] Failed to send close message: %v", err)
+					logger.Error("Failed to send close message", zap.Error(err))
 				}
-				logger.Info("[CLIENT::WPUMP] Connection closing initiated for user: %s", c.username)
+				logger.Info("Connection closing initiated for user", zap.String("username", c.username))
 				return
 			}
 
-			logger.Debug("[CLIENT::SEND] Sending message to client - User: %s, Size: %d bytes", c.username, len(message))
+			logger.Debug("Sending message to client", zap.String("username", c.username), zap.Int("message_size", len(message)))
 			if err := c.conn.WriteMessage(websocket.TextMessage, message); err != nil {
-				logger.Error("[CLIENT::SEND] Failed to write message to user %s: %v", c.username, err)
-				logger.Warn("[CLIENT::SEND] Connection error - terminating write pump")
+				logger.Error("Failed to write message to user", zap.String("username", c.username), zap.Error(err))
+				logger.Warn("Connection error - terminating write pump")
 				return
 			}
-			logger.Debug("[CLIENT::SEND] Message sent successfully to user: %s", c.username)
+			logger.Debug("Message sent successfully to user", zap.String("username", c.username))
 
 		case <-ticker.C:
 			c.conn.SetWriteDeadline(time.Now().Add(writeWait))
-			logger.Debug("[CLIENT::PING] Sending ping message to user: %s", c.username)
+			logger.Debug("Sending ping message to user", zap.String("username", c.username))
 			if err := c.conn.WriteMessage(websocket.PingMessage, nil); err != nil {
-				logger.Error("[CLIENT::PING] Failed to write ping message to user %s: %v", c.username, err)
-				logger.Warn("[CLIENT::PING] Ping send failed - terminating connection")
+				logger.Error("Failed to write ping message to user", zap.String("username", c.username), zap.Error(err))
+				logger.Warn("Ping send failed - terminating connection")
 				return
 			}
-			logger.Debug("[CLIENT::PING] Ping message sent to user: %s", c.username)
+			logger.Debug("Ping message sent to user", zap.String("username", c.username))
 		}
 	}
 }
