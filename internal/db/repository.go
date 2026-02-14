@@ -1,37 +1,42 @@
 package db
 
 import (
-	"database/sql"
+	"context"
 	"fmt"
 	"time"
 
-	_ "github.com/lib/pq"
+	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgxpool"
 	"go.uber.org/zap"
 
 	"li-chat/pkg/logger"
 )
 
 type Repository struct {
-	db *sql.DB
+	pool *pgxpool.Pool
 }
 
 func NewRepository(connStr string) (*Repository, error) {
 	logger.Info("Initializing database repository")
-	db, err := sql.Open("postgres", connStr)
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	pool, err := pgxpool.New(ctx, connStr)
 	if err != nil {
-		logger.Error("Failed to open PostgreSQL database", zap.Error(err))
+		logger.Error("Failed to create connection pool", zap.Error(err))
 		logger.Warn("Repository initialization failed, database operations will not be available")
 		return nil, err
 	}
 
-	if err := db.Ping(); err != nil {
+	if err := pool.Ping(ctx); err != nil {
 		logger.Error("Failed to ping database", zap.Error(err))
+		pool.Close()
 		return nil, err
 	}
-	logger.Debug("PostgreSQL connection established")
+	logger.Debug("PostgreSQL connection pool established")
 
 	logger.Debug("Creating database schema")
-	_, err = db.Exec(`
+	_, err = pool.Exec(ctx, `
 	CREATE TABLE IF NOT EXISTS users (
 		id SERIAL PRIMARY KEY,
 		username TEXT UNIQUE NOT NULL,
@@ -48,30 +53,34 @@ func NewRepository(connStr string) (*Repository, error) {
 	if err != nil {
 		logger.Error("Failed to create schema", zap.Error(err))
 		logger.Warn("Schema creation error, database tables may not exist")
+		pool.Close()
 		return nil, err
 	}
 	logger.Debug("All tables created or already exist")
 	logger.Info("Repository initialized successfully")
 
-	return &Repository{db: db}, nil
+	return &Repository{pool: pool}, nil
 }
 
 func (r *Repository) GetOrCreateUser(username string) (int64, error) {
 	logger.Info("Getting or creating user", zap.String("username", username))
 	logger.Debug("Querying database for existing user", zap.String("username", username))
 
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
 	var id int64
-	err := r.db.QueryRow(
+	err := r.pool.QueryRow(ctx,
 		"SELECT id FROM users WHERE username = $1",
 		username,
 	).Scan(&id)
 
-	if err == sql.ErrNoRows {
+	if err == pgx.ErrNoRows {
 		logger.Debug("User not found in database", zap.String("username", username))
 		logger.Debug("Creating new user record", zap.String("username", username))
 
 		var userID int64
-		err := r.db.QueryRow(
+		err := r.pool.QueryRow(ctx,
 			"INSERT INTO users(username) VALUES($1) RETURNING id",
 			username,
 		).Scan(&userID)
@@ -105,8 +114,11 @@ func (r *Repository) SaveMessage(userID int64, content string) error {
 		logger.Warn("Empty message content provided", zap.Int64("user_id", userID))
 	}
 
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
 	logger.Debug("Executing INSERT query for message")
-	_, err := r.db.Exec(
+	_, err := r.pool.Exec(ctx,
 		"INSERT INTO messages(user_id, content) VALUES($1, $2)",
 		userID,
 		content,
@@ -126,7 +138,10 @@ func (r *Repository) GetMessages(limit int) ([]interface{}, error) {
 	logger.Info("[DB::MSG] Fetching message history with limit: %d", zap.Int("limit", limit))
 	logger.Debug("[DB::MSG] Executing SELECT query for recent messages...")
 
-	rows, err := r.db.Query(`
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	rows, err := r.pool.Query(ctx, `
 		SELECT u.username, m.content, m.created_at
 		FROM messages m
 		JOIN users u ON u.id = m.user_id

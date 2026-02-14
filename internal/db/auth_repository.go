@@ -1,7 +1,15 @@
 package db
 
+import (
+	"context"
+	"time"
+)
+
 func (r *Repository) CreateUser(username, passwordHash string) error {
-	_, err := r.db.Exec(
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	_, err := r.pool.Exec(ctx,
 		"INSERT INTO users(username, password_hash) VALUES ($1, $2)",
 		username, passwordHash,
 	)
@@ -9,10 +17,13 @@ func (r *Repository) CreateUser(username, passwordHash string) error {
 }
 
 func (r *Repository) GetUserForLogin(username string) (int64, string, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
 	var id int64
 	var hash string
 
-	err := r.db.QueryRow(
+	err := r.pool.QueryRow(ctx,
 		"SELECT id, password_hash FROM users WHERE username = $1",
 		username,
 	).Scan(&id, &hash)
@@ -21,9 +32,12 @@ func (r *Repository) GetUserForLogin(username string) (int64, string, error) {
 }
 
 func (r *Repository) GetUserByID(userID int64) (string, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
 	var username string
 
-	err := r.db.QueryRow(
+	err := r.pool.QueryRow(ctx,
 		"SELECT username FROM users WHERE id = $1",
 		userID,
 	).Scan(&username)
