@@ -30,7 +30,7 @@ Thumbs.db
 *.dll
 
 # Go
-go.sum
+# go.sum
 vendor/
 dist/
 build/
