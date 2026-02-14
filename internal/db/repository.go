@@ -3,6 +3,7 @@ package db
 import (
 	"context"
 	"fmt"
+	"net"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -21,7 +22,26 @@ func NewRepository(connStr string) (*Repository, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
-	pool, err := pgxpool.New(ctx, connStr)
+	// Parse config to support both IPv4 and IPv6 with smart fallback
+	config, err := pgxpool.ParseConfig(connStr)
+	if err != nil {
+		logger.Error("Failed to parse connection string", zap.Error(err))
+		return nil, err
+	}
+
+	// Use custom dialer that tries IPv4 first, then IPv6 (better for cloud platforms)
+	config.ConnConfig.DialFunc = func(ctx context.Context, network string, addr string) (net.Conn, error) {
+		dialer := &net.Dialer{}
+		// Try tcp4 first (IPv4 only) - better compatibility with cloud platforms
+		conn, err := dialer.DialContext(ctx, "tcp4", addr)
+		if err == nil {
+			return conn, nil
+		}
+		// Fall back to tcp (both IPv4 and IPv6)
+		return dialer.DialContext(ctx, "tcp", addr)
+	}
+
+	pool, err := pgxpool.NewWithConfig(ctx, config)
 	if err != nil {
 		logger.Error("Failed to create connection pool", zap.Error(err))
 		logger.Warn("Repository initialization failed, database operations will not be available")
