@@ -1,0 +1,3 @@
+- clickable link
+- code indent block send
+- state management for chats

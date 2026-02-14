@@ -1,0 +1,6 @@
+export const CONFIG = {
+  API_BASE: "",
+  WS_PATH: "/ws",
+  RECONNECT_BASE_DELAY: 1000,
+  RECONNECT_MAX_DELAY: 10000
+};

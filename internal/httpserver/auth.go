@@ -112,7 +112,7 @@ func (h *AuthHandler) Logout(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// JWT is stateless, logout is client-side (remove token from localStorage)
-	auth.SendJSONResponse(w, http.StatusMethodNotAllowed, auth.SuccessResponse(model.SuccessResponseStruct{Message: "logout success"}))
+	auth.SendJSONResponse(w, http.StatusOK, auth.SuccessResponse(model.SuccessResponseStruct{Message: "logout success"}))
 }
 
 func (h *AuthHandler) WhoAmI(w http.ResponseWriter, r *http.Request) {
@@ -141,7 +141,7 @@ func (h *AuthHandler) WhoAmI(w http.ResponseWriter, r *http.Request) {
 		Message:  "here you are!",
 	})
 
-	auth.SendJSONResponse(w, http.StatusUnauthorized, response)
+	auth.SendJSONResponse(w, http.StatusOK, response)
 
 }
 

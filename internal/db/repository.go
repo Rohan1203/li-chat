@@ -122,6 +122,51 @@ func (r *Repository) SaveMessage(userID int64, content string) error {
 	return nil
 }
 
+func (r *Repository) GetMessages(limit int) ([]interface{}, error) {
+	logger.Info("[DB::MSG] Fetching message history with limit: %d", zap.Int("limit", limit))
+	logger.Debug("[DB::MSG] Executing SELECT query for recent messages...")
+
+	rows, err := r.db.Query(`
+		SELECT u.username, m.content, m.created_at
+		FROM messages m
+		JOIN users u ON u.id = m.user_id
+		ORDER BY m.created_at ASC
+		LIMIT ?
+	`, limit)
+	if err != nil {
+		logger.Error("[DB::MSG] Failed to fetch messages: %v", zap.Error(err))
+		logger.Warn("[DB::MSG] Message retrieval failed - database query error")
+		return nil, err
+	}
+	defer rows.Close()
+
+	var messages []interface{}
+	for rows.Next() {
+		var username, content, createdAt string
+
+		err := rows.Scan(&username, &content, &createdAt)
+		if err != nil {
+			logger.Error("[DB::MSG] Failed to scan message row: %v", zap.Error(err))
+			continue
+		}
+
+		messages = append(messages, map[string]string{
+			"username":   username,
+			"content":    content,
+			"created_at": createdAt,
+		})
+	}
+
+	if err = rows.Err(); err != nil {
+		logger.Error("[DB::MSG] Error iterating message rows: %v", zap.Error(err))
+		return nil, err
+	}
+
+	logger.Debug("[DB::MSG] Retrieved %d messages from database", zap.Int("messages", len(messages)))
+	logger.Info("[DB::MSG] Message history loaded successfully (count: %d)",  zap.Int("messages", len(messages)))
+	return messages, nil
+}
+
 func generateSessionID() string {
 	// Simple session ID generation (in production, use crypto/rand with UUID)
 	return fmt.Sprintf("sess_%d", time.Now().UnixNano())

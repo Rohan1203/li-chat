@@ -3,41 +3,12 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Go Chat - Real-time Communication</title>
-  <link rel="stylesheet" href="style.css">
+  <title>Go Chat</title>
+  <link rel="stylesheet" href="assets/style.css">
 </head>
 <body>
   <div id="app"></div>
-  <script src="auth.js"></script>
-  <script src="chat.js"></script>
-  <script>
-    document.addEventListener('DOMContentLoaded', async () => {
-      const app = document.getElementById('app');
-      
-      try {
-        const token = localStorage.getItem('token');
-        if (token) {
-          // User has a token, verify it's still valid
-          const res = await fetch('/whoami', {
-            headers: { 'Authorization': `Bearer ${token}` }
-          });
-          if (res.ok) {
-            // Token is valid, show chat
-            renderChat();
-          } else {
-            // Token is invalid, show login
-            localStorage.removeItem('token');
-            renderLogin();
-          }
-        } else {
-          // No token, show login
-          renderLogin();
-        }
-      } catch (err) {
-        console.error('Auth check failed:', err);
-        renderLogin();
-      }
-    });
-  </script>
+
+  <script type="module" src="js/app.js"></script>
 </body>
 </html>
