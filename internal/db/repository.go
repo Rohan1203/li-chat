@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"time"
 
+	_ "github.com/lib/pq"
 	"go.uber.org/zap"
 
 	"li-chat/pkg/logger"
@@ -14,29 +15,34 @@ type Repository struct {
 	db *sql.DB
 }
 
-func NewRepository(path string) (*Repository, error) {
-	logger.Info("Initializing database repository", zap.String("path", path))
-	db, err := sql.Open("sqlite3", path)
+func NewRepository(connStr string) (*Repository, error) {
+	logger.Info("Initializing database repository")
+	db, err := sql.Open("postgres", connStr)
 	if err != nil {
-		logger.Error("Failed to open SQLite database", zap.Error(err))
+		logger.Error("Failed to open PostgreSQL database", zap.Error(err))
 		logger.Warn("Repository initialization failed, database operations will not be available")
 		return nil, err
 	}
-	logger.Debug("SQLite connection established")
+
+	if err := db.Ping(); err != nil {
+		logger.Error("Failed to ping database", zap.Error(err))
+		return nil, err
+	}
+	logger.Debug("PostgreSQL connection established")
 
 	logger.Debug("Creating database schema")
 	_, err = db.Exec(`
 	CREATE TABLE IF NOT EXISTS users (
-		id INTEGER PRIMARY KEY AUTOINCREMENT,
+		id SERIAL PRIMARY KEY,
 		username TEXT UNIQUE NOT NULL,
 		password_hash TEXT NOT NULL
 	);
 
 	CREATE TABLE IF NOT EXISTS messages (
-		id INTEGER PRIMARY KEY AUTOINCREMENT,
+		id SERIAL PRIMARY KEY,
 		user_id INTEGER,
 		content TEXT NOT NULL,
-		created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+		created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 	);
 	`)
 	if err != nil {
@@ -56,7 +62,7 @@ func (r *Repository) GetOrCreateUser(username string) (int64, error) {
 
 	var id int64
 	err := r.db.QueryRow(
-		"SELECT id FROM users WHERE username = ?",
+		"SELECT id FROM users WHERE username = $1",
 		username,
 	).Scan(&id)
 
@@ -64,20 +70,14 @@ func (r *Repository) GetOrCreateUser(username string) (int64, error) {
 		logger.Debug("User not found in database", zap.String("username", username))
 		logger.Debug("Creating new user record", zap.String("username", username))
 
-		res, err := r.db.Exec(
-			"INSERT INTO users(username) VALUES(?)",
+		var userID int64
+		err := r.db.QueryRow(
+			"INSERT INTO users(username) VALUES($1) RETURNING id",
 			username,
-		)
+		).Scan(&userID)
 		if err != nil {
 			logger.Error("Failed to create user record", zap.String("username", username), zap.Error(err))
 			logger.Warn("User creation failed - possible duplicate username or database error")
-			return 0, err
-		}
-
-		userID, err := res.LastInsertId()
-		if err != nil {
-			logger.Error("Failed to get last insert ID for user", zap.String("username", username), zap.Error(err))
-			logger.Warn("Could not retrieve user ID after insertion")
 			return 0, err
 		}
 
@@ -107,7 +107,7 @@ func (r *Repository) SaveMessage(userID int64, content string) error {
 
 	logger.Debug("Executing INSERT query for message")
 	_, err := r.db.Exec(
-		"INSERT INTO messages(user_id, content) VALUES(?, ?)",
+		"INSERT INTO messages(user_id, content) VALUES($1, $2)",
 		userID,
 		content,
 	)
@@ -131,7 +131,7 @@ func (r *Repository) GetMessages(limit int) ([]interface{}, error) {
 		FROM messages m
 		JOIN users u ON u.id = m.user_id
 		ORDER BY m.created_at ASC
-		LIMIT ?
+		LIMIT $1
 	`, limit)
 	if err != nil {
 		logger.Error("[DB::MSG] Failed to fetch messages: %v", zap.Error(err))

@@ -30,7 +30,12 @@ func main() {
 	defer logger.Sync()
 
 	logger.Debug("Initiating database connection")
-	repo, err := db.NewRepository("chat.db")
+	dbConnStr := os.Getenv("DATABASE_URL")
+	if dbConnStr == "" {
+		logger.Error("DATABASE_URL environment variable is not set")
+		panic("DATABASE_URL is required")
+	}
+	repo, err := db.NewRepository(dbConnStr)
 	if err != nil {
 		logger.Error("Failed to initialize database repository", zap.Error(err))
 		logger.Warn("Application cannot start without database connection")
