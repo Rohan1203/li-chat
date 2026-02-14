@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 
 	"li-chat/internal/config"
@@ -35,6 +36,9 @@ func main() {
 		logger.Error("DATABASE_URL environment variable is not set")
 		panic("DATABASE_URL is required")
 	}
+	// Remove quotes if present (sometimes environment variables are quoted)
+	dbConnStr = strings.Trim(dbConnStr, `"`)
+	logger.Debug("Database URL loaded from environment")
 	repo, err := db.NewRepository(dbConnStr)
 	if err != nil {
 		logger.Error("Failed to initialize database repository", zap.Error(err))
