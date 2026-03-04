@@ -4,7 +4,6 @@ import (
 	"context"
 	"os"
 	"os/signal"
-	"strings"
 	"syscall"
 
 	"li-chat/internal/config"
@@ -30,21 +29,30 @@ func main() {
 	})
 	defer logger.Sync()
 
-	logger.Debug("Initiating database connection")
-	dbConnStr := os.Getenv("DATABASE_URL")
-	if dbConnStr == "" {
-		logger.Error("DATABASE_URL environment variable is not set")
-		panic("DATABASE_URL is required")
-	}
-	// Remove quotes if present (sometimes environment variables are quoted)
-	dbConnStr = strings.Trim(dbConnStr, `"`)
-	logger.Debug("Database URL loaded from environment")
-	repo, err := db.NewRepository(dbConnStr)
+	// logger.Debug("Initiating database connection")
+	// dbConnStr := os.Getenv("DATABASE_URL")
+	// if dbConnStr == "" {
+	// 	logger.Error("DATABASE_URL environment variable is not set")
+	// 	panic("DATABASE_URL is required")
+	// }
+	// // Remove quotes if present (sometimes environment variables are quoted)
+	// dbConnStr = strings.Trim(dbConnStr, `"`)
+	// logger.Debug("Database URL loaded from environment")
+	// repo, err := db.NewRepository(dbConnStr)
+	// if err != nil {
+	// 	logger.Error("Failed to initialize database repository", zap.Error(err))
+	// 	logger.Warn("Application cannot start without database connection")
+	// 	panic(err)
+	// }
+
+	logger.Debug("Initiating Supabase connection")
+
+	repo, err := db.NewRepository()
 	if err != nil {
-		logger.Error("Failed to initialize database repository", zap.Error(err))
-		logger.Warn("Application cannot start without database connection")
+		logger.Error("Failed to initialize Supabase repository", zap.Error(err))
 		panic(err)
 	}
+	
 	logger.Info("Logger initialized successfully")
 
 	logger.Debug("Creating and starting WebSocket hub")

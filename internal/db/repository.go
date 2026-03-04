@@ -1,208 +1,180 @@
 package db
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
-	"net"
+	"io"
+	"net/http"
+	"os"
 	"time"
 
-	"github.com/jackc/pgx/v5"
-	"github.com/jackc/pgx/v5/pgxpool"
 	"go.uber.org/zap"
-
 	"li-chat/pkg/logger"
 )
 
 type Repository struct {
-	pool *pgxpool.Pool
+	baseURL string
+	apiKey  string
+	client  *http.Client
 }
 
-func NewRepository(connStr string) (*Repository, error) {
-	logger.Info("Initializing database repository")
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
+func NewRepository() (*Repository, error) {
+	logger.Info("Initializing Supabase repository")
 
-	// Parse config to support both IPv4 and IPv6 with smart fallback
-	config, err := pgxpool.ParseConfig(connStr)
-	if err != nil {
-		logger.Error("Failed to parse connection string", zap.Error(err))
-		return nil, err
+	url := os.Getenv("SUPABASE_URL")
+	key := os.Getenv("SUPABASE_KEY")
+
+	if url == "" || key == "" {
+		return nil, fmt.Errorf("SUPABASE_URL and SUPABASE_KEY must be set")
 	}
 
-	// Use custom dialer that tries IPv4 first, then IPv6 (better for cloud platforms)
-	config.ConnConfig.DialFunc = func(ctx context.Context, network string, addr string) (net.Conn, error) {
-		dialer := &net.Dialer{}
-		// Try tcp4 first (IPv4 only) - better compatibility with cloud platforms
-		conn, err := dialer.DialContext(ctx, "tcp4", addr)
-		if err == nil {
-			return conn, nil
+	return &Repository{
+		baseURL: url + "/rest/v1",
+		apiKey:  key,
+		client: &http.Client{
+			Timeout: 10 * time.Second,
+		},
+	}, nil
+}
+
+func (r *Repository) request(ctx context.Context, method, endpoint string, body interface{}) (*http.Response, error) {
+	var jsonBody []byte
+	var err error
+
+	if body != nil {
+		jsonBody, err = json.Marshal(body)
+		if err != nil {
+			return nil, err
 		}
-		// Fall back to tcp (both IPv4 and IPv6)
-		return dialer.DialContext(ctx, "tcp", addr)
 	}
 
-	pool, err := pgxpool.NewWithConfig(ctx, config)
+	req, err := http.NewRequestWithContext(
+		ctx,
+		method,
+		r.baseURL+endpoint,
+		bytes.NewBuffer(jsonBody),
+	)
 	if err != nil {
-		logger.Error("Failed to create connection pool", zap.Error(err))
-		logger.Warn("Repository initialization failed, database operations will not be available")
 		return nil, err
 	}
 
-	if err := pool.Ping(ctx); err != nil {
-		logger.Error("Failed to ping database", zap.Error(err))
-		pool.Close()
-		return nil, err
+	req.Header.Set("apikey", r.apiKey)
+	req.Header.Set("Authorization", "Bearer "+r.apiKey)
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Prefer", "return=representation")
+
+	return r.client.Do(req)
+}
+
+func handleError(resp *http.Response) error {
+	if resp.StatusCode >= 200 && resp.StatusCode < 300 {
+		return nil
 	}
-	logger.Debug("PostgreSQL connection pool established")
-
-	logger.Debug("Creating database schema")
-	_, err = pool.Exec(ctx, `
-	CREATE TABLE IF NOT EXISTS users (
-		id SERIAL PRIMARY KEY,
-		username TEXT UNIQUE NOT NULL,
-		password_hash TEXT NOT NULL
-	);
-
-	CREATE TABLE IF NOT EXISTS messages (
-		id SERIAL PRIMARY KEY,
-		user_id INTEGER,
-		content TEXT NOT NULL,
-		created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-	);
-	`)
-	if err != nil {
-		logger.Error("Failed to create schema", zap.Error(err))
-		logger.Warn("Schema creation error, database tables may not exist")
-		pool.Close()
-		return nil, err
-	}
-	logger.Debug("All tables created or already exist")
-	logger.Info("Repository initialized successfully")
-
-	return &Repository{pool: pool}, nil
+	body, _ := io.ReadAll(resp.Body)
+	return fmt.Errorf("supabase error: %s", string(body))
 }
 
 func (r *Repository) GetOrCreateUser(username string) (int64, error) {
 	logger.Info("Getting or creating user", zap.String("username", username))
-	logger.Debug("Querying database for existing user", zap.String("username", username))
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
-	var id int64
-	err := r.pool.QueryRow(ctx,
-		"SELECT id FROM users WHERE username = $1",
-		username,
-	).Scan(&id)
+	// 1️⃣ Try fetch existing user
+	endpoint := fmt.Sprintf("/users?username=eq.%s&select=id", username)
 
-	if err == pgx.ErrNoRows {
-		logger.Debug("User not found in database", zap.String("username", username))
-		logger.Debug("Creating new user record", zap.String("username", username))
-
-		var userID int64
-		err := r.pool.QueryRow(ctx,
-			"INSERT INTO users(username) VALUES($1) RETURNING id",
-			username,
-		).Scan(&userID)
-		if err != nil {
-			logger.Error("Failed to create user record", zap.String("username", username), zap.Error(err))
-			logger.Warn("User creation failed - possible duplicate username or database error")
-			return 0, err
-		}
-
-		logger.Debug("New user inserted", zap.String("username", username), zap.Int64("user_id", userID))
-		logger.Info("New user created successfully", zap.String("username", username), zap.Int64("user_id", userID))
-		return userID, nil
-	}
-
+	resp, err := r.request(ctx, "GET", endpoint, nil)
 	if err != nil {
-		logger.Error("Failed to query user from database", zap.String("username", username), zap.Error(err))
-		logger.Warn("Database query error occurred while retrieving user")
+		return 0, err
+	}
+	defer resp.Body.Close()
+
+	if err := handleError(resp); err != nil {
 		return 0, err
 	}
 
-	logger.Debug("Existing user found", zap.String("username", username), zap.Int64("user_id", id))
-	logger.Info("User already exists in database", zap.String("username", username), zap.Int64("user_id", id))
-	return id, err
+	var users []map[string]interface{}
+	if err := json.NewDecoder(resp.Body).Decode(&users); err != nil {
+		return 0, err
+	}
+
+	if len(users) > 0 {
+		id := int64(users[0]["id"].(float64))
+		logger.Info("User already exists", zap.Int64("id", id))
+		return id, nil
+	}
+
+	// 2️⃣ Create new user
+	body := map[string]string{
+		"username": username,
+	}
+
+	resp, err = r.request(ctx, "POST", "/users", body)
+	if err != nil {
+		return 0, err
+	}
+	defer resp.Body.Close()
+
+	if err := handleError(resp); err != nil {
+		return 0, err
+	}
+
+	var created []map[string]interface{}
+	if err := json.NewDecoder(resp.Body).Decode(&created); err != nil {
+		return 0, err
+	}
+
+	id := int64(created[0]["id"].(float64))
+	logger.Info("New user created", zap.Int64("id", id))
+
+	return id, nil
 }
 
 func (r *Repository) SaveMessage(userID int64, content string) error {
-	logger.Info("Saving new message", zap.Int64("user_id", userID))
-	logger.Debug("Message details", zap.Int64("user_id", userID), zap.Int("content_length", len(content)))
-
-	if content == "" {
-		logger.Warn("Empty message content provided", zap.Int64("user_id", userID))
-	}
+	logger.Info("Saving message", zap.Int64("user_id", userID))
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
-	logger.Debug("Executing INSERT query for message")
-	_, err := r.pool.Exec(ctx,
-		"INSERT INTO messages(user_id, content) VALUES($1, $2)",
-		userID,
-		content,
-	)
-	if err != nil {
-		logger.Error("Failed to save message", zap.Int64("user_id", userID), zap.Error(err))
-		logger.Warn("Message insertion failed - database may be unavailable or corrupted")
-		return err
+	body := map[string]interface{}{
+		"user_id": userID,
+		"content": content,
 	}
 
-	logger.Debug("Message record inserted successfully into database")
-	logger.Info("Message saved successfully", zap.Int64("user_id", userID), zap.Int("content_size", len(content)))
-	return nil
+	resp, err := r.request(ctx, "POST", "/messages", body)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+
+	return handleError(resp)
 }
 
 func (r *Repository) GetMessages(limit int) ([]interface{}, error) {
-	logger.Info("[DB::MSG] Fetching message history with limit: %d", zap.Int("limit", limit))
-	logger.Debug("[DB::MSG] Executing SELECT query for recent messages...")
+	logger.Info("Fetching messages", zap.Int("limit", limit))
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
-	rows, err := r.pool.Query(ctx, `
-		SELECT u.username, m.content, m.created_at
-		FROM messages m
-		JOIN users u ON u.id = m.user_id
-		ORDER BY m.created_at ASC
-		LIMIT $1
-	`, limit)
+	endpoint := fmt.Sprintf(
+		"/messages?select=content,created_at,users(username)&order=created_at.asc&limit=%d",
+		limit,
+	)
+
+	resp, err := r.request(ctx, "GET", endpoint, nil)
 	if err != nil {
-		logger.Error("[DB::MSG] Failed to fetch messages: %v", zap.Error(err))
-		logger.Warn("[DB::MSG] Message retrieval failed - database query error")
 		return nil, err
 	}
-	defer rows.Close()
+	defer resp.Body.Close()
 
-	var messages []interface{}
-	for rows.Next() {
-		var username, content, createdAt string
-
-		err := rows.Scan(&username, &content, &createdAt)
-		if err != nil {
-			logger.Error("[DB::MSG] Failed to scan message row: %v", zap.Error(err))
-			continue
-		}
-
-		messages = append(messages, map[string]string{
-			"username":   username,
-			"content":    content,
-			"created_at": createdAt,
-		})
-	}
-
-	if err = rows.Err(); err != nil {
-		logger.Error("[DB::MSG] Error iterating message rows: %v", zap.Error(err))
+	if err := handleError(resp); err != nil {
 		return nil, err
 	}
 
-	logger.Debug("[DB::MSG] Retrieved %d messages from database", zap.Int("messages", len(messages)))
-	logger.Info("[DB::MSG] Message history loaded successfully (count: %d)",  zap.Int("messages", len(messages)))
-	return messages, nil
-}
+	var result []interface{}
+	err = json.NewDecoder(resp.Body).Decode(&result)
 
-func generateSessionID() string {
-	// Simple session ID generation (in production, use crypto/rand with UUID)
-	return fmt.Sprintf("sess_%d", time.Now().UnixNano())
+	return result, err
 }

@@ -2,6 +2,8 @@ package db
 
 import (
 	"context"
+	"encoding/json"
+	"fmt"
 	"time"
 )
 
@@ -9,38 +11,81 @@ func (r *Repository) CreateUser(username, passwordHash string) error {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
-	_, err := r.pool.Exec(ctx,
-		"INSERT INTO users(username, password_hash) VALUES ($1, $2)",
-		username, passwordHash,
-	)
-	return err
+	body := map[string]interface{}{
+		"username":      username,
+		"password_hash": passwordHash,
+	}
+
+	resp, err := r.request(ctx, "POST", "/users", body)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+
+	return handleError(resp)
 }
 
 func (r *Repository) GetUserForLogin(username string) (int64, string, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
-	var id int64
-	var hash string
-
-	err := r.pool.QueryRow(ctx,
-		"SELECT id, password_hash FROM users WHERE username = $1",
+	endpoint := fmt.Sprintf(
+		"/users?username=eq.%s&select=id,password_hash",
 		username,
-	).Scan(&id, &hash)
+	)
 
-	return id, hash, err
+	resp, err := r.request(ctx, "GET", endpoint, nil)
+	if err != nil {
+		return 0, "", err
+	}
+	defer resp.Body.Close()
+
+	if err := handleError(resp); err != nil {
+		return 0, "", err
+	}
+
+	var users []map[string]interface{}
+	if err := json.NewDecoder(resp.Body).Decode(&users); err != nil {
+		return 0, "", err
+	}
+
+	if len(users) == 0 {
+		return 0, "", fmt.Errorf("user not found")
+	}
+
+	id := int64(users[0]["id"].(float64))
+	hash := users[0]["password_hash"].(string)
+
+	return id, hash, nil
 }
 
 func (r *Repository) GetUserByID(userID int64) (string, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
-	var username string
-
-	err := r.pool.QueryRow(ctx,
-		"SELECT username FROM users WHERE id = $1",
+	endpoint := fmt.Sprintf(
+		"/users?id=eq.%d&select=username",
 		userID,
-	).Scan(&username)
+	)
 
-	return username, err
+	resp, err := r.request(ctx, "GET", endpoint, nil)
+	if err != nil {
+		return "", err
+	}
+	defer resp.Body.Close()
+
+	if err := handleError(resp); err != nil {
+		return "", err
+	}
+
+	var users []map[string]interface{}
+	if err := json.NewDecoder(resp.Body).Decode(&users); err != nil {
+		return "", err
+	}
+
+	if len(users) == 0 {
+		return "", fmt.Errorf("user not found")
+	}
+
+	return users[0]["username"].(string), nil
 }
