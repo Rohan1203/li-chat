@@ -44,7 +44,7 @@ func (h *AuthHandler) Register(w http.ResponseWriter, r *http.Request) {
 
 	err = h.repo.CreateUser(c.Username, hash)
 	if err != nil {
-		if strings.Contains(err.Error(), "UNIQUE constraint failed") {
+		if strings.Contains(err.Error(), "duplicate key") || strings.Contains(err.Error(), "already exists") {
 			auth.SendJSONResponse(w, http.StatusConflict, auth.ErrorResponse("user with this username already exists"))
 			return
 		}

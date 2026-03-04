@@ -10,7 +10,7 @@ export function renderLogin() {
         <input id="username" placeholder="Username" required />
         <input id="password" type="password" placeholder="Password" required />
         <div class="button-group">
-          <button onclick="renderRegister()">Register</button>
+          <button id="loginRegisterBtn">Register</button>
           <button id="loginBtn">Login</button>
         </div>
       </div>
@@ -18,6 +18,7 @@ export function renderLogin() {
   `;
 
   document.getElementById('loginBtn').addEventListener('click', handleLogin);
+  document.getElementById('loginRegisterBtn').addEventListener('click', renderRegister);
   document.getElementById('password').addEventListener('keypress', e => {
     if (e.key === 'Enter') handleLogin();
   });
@@ -33,13 +34,14 @@ export function renderRegister() {
         <input id="username" placeholder="Username" required />
         <input id="password" type="password" placeholder="Password" required />
         <div class="button-group">
-          <button onclick="renderLogin()">Back</button>
+          <button id="backToLoginBtn">Back</button>
           <button id="registerBtn">Register</button>
         </div>
       </div>
     </div>
   `;
 
+  document.getElementById('backToLoginBtn').addEventListener('click', renderLogin);
   document.getElementById('registerBtn').addEventListener('click', handleRegister);
 }
 
@@ -96,8 +98,8 @@ async function handleRegister() {
 
     if (!res.ok) throw new Error(data.message || 'Registration failed');
 
-    localStorage.setItem('token', data.token || '');
-    handleLogin();
+    // Registration successful - go back to login
+    renderLogin();
   } catch (err) {
     showError(err.message || "Network error");
     btn.disabled = false;

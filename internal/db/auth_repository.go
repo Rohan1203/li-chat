@@ -5,6 +5,9 @@ import (
 	"encoding/json"
 	"fmt"
 	"time"
+
+	"go.uber.org/zap"
+	"li-chat/pkg/logger"
 )
 
 func (r *Repository) CreateUser(username, passwordHash string) error {
@@ -22,7 +25,18 @@ func (r *Repository) CreateUser(username, passwordHash string) error {
 	}
 	defer resp.Body.Close()
 
-	return handleError(resp)
+	// Log response status for debugging
+	logger.Info("CreateUser response", 
+		zap.Int("status", resp.StatusCode),
+		zap.String("username", username))
+
+	if err := handleError(resp); err != nil {
+		logger.Error("Failed to create user in Supabase", 
+			zap.Error(err),
+			zap.Int("status", resp.StatusCode))
+		return err
+	}
+	return nil
 }
 
 func (r *Repository) GetUserForLogin(username string) (int64, string, error) {
